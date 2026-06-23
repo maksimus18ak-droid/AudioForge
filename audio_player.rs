@@ -1,0 +1,97 @@
+// audio_player.rs - Аудиоплеер на Rust (веб-сервер)
+use actix_web::{web, App, HttpResponse, HttpServer, Result};
+
+async fn index() -> HttpResponse {
+    let html = r#"<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>🎵 AudioForge - Rust</title>
+<style>*{box-sizing:border-box;margin:0;user-select:none;}body{background:#1e2a3a;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:'Segoe UI',system-ui;padding:20px;}
+.container{background:#2c3e50;border-radius:24px;padding:30px;box-shadow:0 20px 40px rgba(0,0,0,0.4);width:550px;}
+h1{color:#ecf0f1;font-size:24px;text-align:center;margin-bottom:15px;}
+.controls{display:flex;gap:10px;justify-content:center;align-items:center;margin-bottom:15px;flex-wrap:wrap;}
+.controls button{padding:10px 18px;border:none;border-radius:30px;font-size:18px;font-weight:bold;cursor:pointer;transition:0.1s;background:#34495e;color:white;}
+.controls button:hover{background:#3d566e;}
+.controls button.play{background:#2ecc71;}
+.controls button.play:hover{background:#27ae60;}
+.controls button.stop{background:#e74c3c;}
+.controls button.stop:hover{background:#c0392b;}
+.volume{display:flex;align-items:center;gap:10px;color:white;}
+.volume input{width:100px;accent-color:#3498db;}
+.info{color:#ecf0f1;text-align:center;margin:10px 0;}
+.info .title{font-size:18px;font-weight:bold;}
+.info .time{font-size:14px;color:#bdc3c7;}
+.progress{width:100%;height:6px;background:#34495e;border-radius:3px;overflow:hidden;margin:10px 0;cursor:pointer;}
+.progress-fill{height:100%;background:#2ecc71;width:0%;transition:width 0.1s;}
+.playlist{max-height:200px;overflow-y:auto;margin-top:15px;border-top:1px solid #34495e;padding-top:10px;}
+.playlist-item{color:#bdc3c7;padding:8px 12px;border-radius:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;}
+.playlist-item:hover{background:#34495e;}
+.playlist-item.active{background:#2c3e50;color:white;}
+.playlist-item .remove{color:#e74c3c;cursor:pointer;font-size:14px;background:none;border:none;}
+.playlist-item .remove:hover{color:#c0392b;}
+.playlist-controls{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+.playlist-controls button{padding:6px 14px;border:none;border-radius:20px;cursor:pointer;font-size:12px;background:#34495e;color:white;}
+.playlist-controls button:hover{background:#3d566e;}
+.playlist-controls .add{background:#2ecc71;}
+.playlist-controls .add:hover{background:#27ae60;}
+.playlist-controls .clear{background:#e74c3c;}
+.playlist-controls .clear:hover{background:#c0392b;}
+.status{color:#7f8c8d;font-size:12px;text-align:center;margin-top:10px;}
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:#2c3e50;}
+::-webkit-scrollbar-thumb{background:#5d6d7e;border-radius:4px;}
+</style></head>
+<body>
+<div class="container">
+<h1>🎵 AudioForge · Rust</h1>
+<div class="controls">
+<button id="playBtn" class="play">▶</button>
+<button id="stopBtn" class="stop">⏹</button>
+<button id="prevBtn">⏮</button>
+<button id="nextBtn">⏭</button>
+<div class="volume"><span>🔊</span><input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="0.8"></div>
+</div>
+<div class="info"><div class="title" id="trackTitle">Нет трека</div><div class="time" id="trackTime">00:00 / 00:00</div></div>
+<div class="progress" id="progressBar"><div class="progress-fill" id="progressFill"></div></div>
+<div class="playlist-controls">
+<button class="add" id="addBtn">➕ Добавить файл</button>
+<button class="clear" id="clearBtn">🗑️ Очистить</button>
+<input type="file" id="fileInput" accept=".mp3" multiple style="display:none">
+</div>
+<div class="playlist" id="playlist"></div>
+<div class="status" id="statusMsg">Готов</div>
+</div>
+<script>
+class AudioPlayer {
+constructor(){this.audio=new Audio();this.playlist=[];this.currentIndex=-1;this.isPlaying=false;this.isPaused=false;this.volume=0.8;this.audio.volume=this.volume;
+this.initElements();this.initEvents();this.updatePlaylist();}
+initElements(){this.playBtn=document.getElementById('playBtn');this.stopBtn=document.getElementById('stopBtn');this.prevBtn=document.getElementById('prevBtn');this.nextBtn=document.getElementById('nextBtn');this.volumeSlider=document.getElementById('volumeSlider');this.trackTitle=document.getElementById('trackTitle');this.trackTime=document.getElementById('trackTime');this.progressFill=document.getElementById('progressFill');this.progressBar=document.getElementById('progressBar');this.playlistEl=document.getElementById('playlist');this.statusMsg=document.getElementById('statusMsg');this.fileInput=document.getElementById('fileInput');this.addBtn=document.getElementById('addBtn');this.clearBtn=document.getElementById('clearBtn');}
+initEvents(){this.playBtn.addEventListener('click',()=>this.playPause());this.stopBtn.addEventListener('click',()=>this.stop());this.prevBtn.addEventListener('click',()=>this.prevTrack());this.nextBtn.addEventListener('click',()=>this.nextTrack());this.volumeSlider.addEventListener('input',(e)=>{this.volume=parseFloat(e.target.value);this.audio.volume=this.volume;});this.progressBar.addEventListener('click',(e)=>{if(!this.audio.duration)return;const rect=this.progressBar.getBoundingClientRect();const percent=(e.clientX-rect.left)/rect.width;this.audio.currentTime=percent*this.audio.duration;});this.audio.addEventListener('timeupdate',()=>this.updateProgress());this.audio.addEventListener('ended',()=>{this.isPlaying=false;this.playBtn.textContent='▶';this.statusMsg.textContent='Завершено';this.nextTrack();});this.audio.addEventListener('loadedmetadata',()=>{this.updateTimeDisplay();});
+this.addBtn.addEventListener('click',()=>this.fileInput.click());this.fileInput.addEventListener('change',(e)=>{const files=e.target.files;for(const file of files){if(file.type==='audio/mpeg'||file.name.endsWith('.mp3')){const url=URL.createObjectURL(file);this.playlist.push({name:file.name,url:url,file:file});}}this.updatePlaylist();this.fileInput.value='';if(this.currentIndex===-1&&this.playlist.length>0){this.currentIndex=0;this.loadTrack(0);}});
+this.clearBtn.addEventListener('click',()=>{this.playlist=[];this.currentIndex=-1;this.stop();this.trackTitle.textContent='Нет трека';this.trackTime.textContent='00:00 / 00:00';this.progressFill.style.width='0%';this.updatePlaylist();});
+document.addEventListener('keydown',(e)=>{if(e.key===' '){e.preventDefault();this.playPause();}});}
+loadTrack(index){if(index<0||index>=this.playlist.length)return;this.currentIndex=index;const track=this.playlist[index];this.audio.src=track.url;this.trackTitle.textContent=track.name;this.statusMsg.textContent='Загружено';this.updatePlaylist();this.updateTimeDisplay();}
+playPause(){if(this.playlist.length===0){this.statusMsg.textContent='Нет треков в плейлисте';return;}if(this.currentIndex===-1){this.currentIndex=0;this.loadTrack(0);}
+if(this.isPlaying&&!this.isPaused){this.audio.pause();this.isPaused=true;this.playBtn.textContent='▶';this.statusMsg.textContent='Пауза';}else if(this.isPaused){this.audio.play();this.isPaused=false;this.playBtn.textContent='⏸';this.statusMsg.textContent='Играет';}else{this.audio.play();this.isPlaying=true;this.isPaused=false;this.playBtn.textContent='⏸';this.statusMsg.textContent='Играет';}}
+stop(){this.audio.pause();this.audio.currentTime=0;this.isPlaying=false;this.isPaused=false;this.playBtn.textContent='▶';this.statusMsg.textContent='Остановлено';this.progressFill.style.width='0%';this.updateTimeDisplay();}
+nextTrack(){if(this.playlist.length===0)return;this.currentIndex=(this.currentIndex+1)%this.playlist.length;this.stop();this.loadTrack(this.currentIndex);this.playPause();}
+prevTrack(){if(this.playlist.length===0)return;this.currentIndex=(this.currentIndex-1+this.playlist.length)%this.playlist.length;this.stop();this.loadTrack(this.currentIndex);this.playPause();}
+updateProgress(){if(!this.audio.duration)return;const percent=(this.audio.currentTime/this.audio.duration)*100;this.progressFill.style.width=percent+'%';this.updateTimeDisplay();}
+updateTimeDisplay(){const current=this.formatTime(this.audio.currentTime||0);const total=this.formatTime(this.audio.duration||0);this.trackTime.textContent=current+' / '+total;}
+formatTime(seconds){const m=Math.floor(seconds/60);const s=Math.floor(seconds%60);return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');}
+updatePlaylist(){this.playlistEl.innerHTML='';this.playlist.forEach((track,index)=>{const div=document.createElement('div');div.className='playlist-item';if(index===this.currentIndex)div.classList.add('active');div.innerHTML='<span>'+track.name+'</span><button class="remove" data-index="'+index+'">✕</button>';div.addEventListener('click',()=>{this.currentIndex=index;this.stop();this.loadTrack(index);this.playPause();});const removeBtn=div.querySelector('.remove');removeBtn.addEventListener('click',(e)=>{e.stopPropagation();this.removeTrack(index);});this.playlistEl.appendChild(div);});}
+removeTrack(index){if(index<0||index>=this.playlist.length)return;if(index===this.currentIndex)this.stop();this.playlist.splice(index,1);if(this.currentIndex>index)this.currentIndex--;else if(this.currentIndex===index){this.currentIndex=-1;this.trackTitle.textContent='Нет трека';this.trackTime.textContent='00:00 / 00:00';this.progressFill.style.width='0%';}this.updatePlaylist();if(this.currentIndex===-1&&this.playlist.length>0){this.currentIndex=0;this.loadTrack(0);}}
+}
+document.addEventListener('DOMContentLoaded',()=>{new AudioPlayer();});
+</script>
+</body></html>"#;
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(html)
+}
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    HttpServer::new(|| App::new().route("/", web::get().to(index)))
+        .bind("127.0.0.1:8000")?
+        .run()
+        .await
+}
